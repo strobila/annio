@@ -1,40 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-
-type AnnotationBox = {
-  id: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  label?: string;
-  imageId?: number;
-};
-
-type AnnotationImage = {
-  id: number;
-  file_name: string;
-  width?: number;
-  height?: number;
-};
-
-type DirectoryHandle = {
-  name?: string;
-  getDirectoryHandle: (
-    name: string,
-    options?: { create?: boolean }
-  ) => Promise<DirectoryHandle>;
-  getFileHandle: (
-    name: string,
-    options?: { create?: boolean }
-  ) => Promise<{ getFile: () => Promise<File> }>;
-};
-
-type AnnotationParseResult = {
-  boxes: AnnotationBox[];
-  format: string;
-  warning?: string;
-  images?: AnnotationImage[];
-};
+import CanvasArea from "./components/CanvasArea";
+import Sidebar from "./components/Sidebar";
+import Toolbar from "./components/Toolbar";
+import type {
+  AnnotationBox,
+  AnnotationImage,
+  AnnotationParseResult,
+  AnnotationSource,
+  DirectoryHandle,
+  ImageMetrics
+} from "./types";
+import { buildAttemptedPath, getBaseName, normalizePath } from "./utils/paths";
+import {
+  parseAnnotationBoxes,
+  parseCoco,
+  parseCocoText,
+  parseVoc,
+  parseYolo
+} from "./utils/parsers";
 
 export default function App() {
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -48,9 +31,9 @@ export default function App() {
   const [annotationBoxes, setAnnotationBoxes] = useState<AnnotationBox[]>([]);
   const [annotationFormat, setAnnotationFormat] = useState<string | null>(null);
   const [annotationWarning, setAnnotationWarning] = useState<string | null>(null);
-  const [annotationSource, setAnnotationSource] = useState<
-    "coco" | "coco-text" | "voc" | "yolo" | "simple" | null
-  >(null);
+  const [annotationSource, setAnnotationSource] = useState<AnnotationSource>(
+    null
+  );
   const [showAnnotationPanel, setShowAnnotationPanel] = useState(false);
   const [annotationItems, setAnnotationItems] = useState<AnnotationImage[]>([]);
   const [selectedImageId, setSelectedImageId] = useState<number | null>(null);
@@ -63,7 +46,7 @@ export default function App() {
     null
   );
   const [imageRootName, setImageRootName] = useState<string | null>(null);
-  const [imageMetrics, setImageMetrics] = useState({
+  const [imageMetrics, setImageMetrics] = useState<ImageMetrics>({
     naturalWidth: 0,
     naturalHeight: 0,
     displayWidth: 0,
@@ -82,13 +65,15 @@ export default function App() {
     }
     try {
       const handle = await picker();
+      const rootName = handle.name ?? "選択済み";
       setImageRootHandle(handle);
-      setImageRootName(handle.name ?? "選択済み");
+      setImageRootName(rootName);
       if (selectedImageName) {
         const loaded = await tryLoadImageFromHandle(handle, selectedImageName);
         if (!loaded) {
           setImageMismatch(
             `画像の読み込みに失敗しました。パス: ${buildAttemptedPath(
+              rootName,
               selectedImageName
             )}`
           );
@@ -158,19 +143,6 @@ export default function App() {
       displayWidth: 0,
       displayHeight: 0
     });
-  };
-
-  const normalizePath = (value: string) => value.replace(/\\/g, "/");
-
-  const buildAttemptedPath = (fileName: string) => {
-    const rootLabel = imageRootName ?? "未選択";
-    return `ルート: ${rootLabel} / 相対パス: ${normalizePath(fileName)}`;
-  };
-
-  const getBaseName = (value: string) => {
-    const normalized = normalizePath(value);
-    const parts = normalized.split("/");
-    return parts[parts.length - 1] || normalized;
   };
 
   const loadImageFile = useCallback(
@@ -247,214 +219,6 @@ export default function App() {
     });
   };
 
-  const parseAnnotationBoxes = (data: unknown): AnnotationBox[] => {
-    const normalize = (item: any, index: number): AnnotationBox | null => {
-      if (!item || typeof item !== "object") {
-        return null;
-      }
-
-      const id = String(item.id ?? item.name ?? index + 1);
-      if (Array.isArray(item.bbox) && item.bbox.length >= 4) {
-        const [x, y, width, height] = item.bbox;
-        return {
-          id,
-          x: Number(x),
-          y: Number(y),
-          width: Number(width),
-          height: Number(height),
-          label: item.label ?? item.category ?? item.text
-        };
-      }
-
-      if (
-        typeof item.x === "number" &&
-        typeof item.y === "number" &&
-        typeof item.width === "number" &&
-        typeof item.height === "number"
-      ) {
-        return {
-          id,
-          x: item.x,
-          y: item.y,
-          width: item.width,
-          height: item.height,
-          label: item.label ?? item.category ?? item.text
-        };
-      }
-
-      return null;
-    };
-
-    const extract = (items: unknown): AnnotationBox[] => {
-      if (!Array.isArray(items)) {
-        return [];
-      }
-      return items
-        .map((item, index) => normalize(item, index))
-        .filter((item): item is AnnotationBox => item !== null);
-    };
-
-    if (Array.isArray(data)) {
-      return extract(data);
-    }
-
-    if (data && typeof data === "object") {
-      const record = data as Record<string, unknown>;
-      return (
-        extract(record.boxes) ||
-        extract(record.annotations) ||
-        extract(record.objects)
-      );
-    }
-
-    return [];
-  };
-
-  const parseCoco = (data: any): AnnotationParseResult => {
-    const images = Array.isArray(data.images) ? data.images : [];
-    const annotations = Array.isArray(data.annotations) ? data.annotations : [];
-    const categories = Array.isArray(data.categories) ? data.categories : [];
-    const categoryMap = new Map(
-      categories
-        .filter((cat: any) => cat && cat.id != null)
-        .map((cat: any) => [cat.id, cat.name ?? String(cat.id)])
-    );
-    const boxes = annotations
-      .map((ann: any, index: number) => {
-        const bbox = Array.isArray(ann.bbox) ? ann.bbox : [0, 0, 0, 0];
-        const label = categoryMap.get(ann.category_id) ?? ann.label;
-        return {
-          id: String(ann.id ?? index + 1),
-          x: Number(bbox[0] ?? 0),
-          y: Number(bbox[1] ?? 0),
-          width: Number(bbox[2] ?? 0),
-          height: Number(bbox[3] ?? 0),
-          label,
-          imageId: ann.image_id ?? undefined
-        } satisfies AnnotationBox;
-      });
-
-    return { boxes, format: "COCO", images };
-  };
-
-  const parseCocoText = (data: any): AnnotationParseResult => {
-    const images = Array.isArray(data.images) ? data.images : [];
-    const annotations = Array.isArray(data.annotations) ? data.annotations : [];
-    const boxes = annotations
-      .map((ann: any, index: number) => {
-        const bbox = Array.isArray(ann.bbox) ? ann.bbox : [0, 0, 0, 0];
-        const transcription =
-          ann.transcription ?? ann.utf8_string ?? ann.text ?? ann.label;
-        return {
-          id: String(ann.id ?? index + 1),
-          x: Number(bbox[0] ?? 0),
-          y: Number(bbox[1] ?? 0),
-          width: Number(bbox[2] ?? 0),
-          height: Number(bbox[3] ?? 0),
-          label: transcription ? String(transcription) : undefined,
-          imageId: ann.image_id ?? undefined
-        } satisfies AnnotationBox;
-      });
-
-    return { boxes, format: "COCO-Text", images };
-  };
-
-  const parseVoc = (rawText: string): AnnotationParseResult => {
-    const parser = new DOMParser();
-    const xml = parser.parseFromString(rawText, "application/xml");
-    const parserError = xml.querySelector("parsererror");
-    if (parserError) {
-      throw new Error("XMLの解析に失敗しました");
-    }
-
-    const fileName =
-      xml.getElementsByTagName("filename")[0]?.textContent ?? "image.jpg";
-    const width = Number(
-      xml.getElementsByTagName("width")[0]?.textContent ?? 0
-    );
-    const height = Number(
-      xml.getElementsByTagName("height")[0]?.textContent ?? 0
-    );
-    const imageId = 1;
-
-    const objects = Array.from(xml.getElementsByTagName("object"));
-    const boxes = objects
-      .map((obj, index): AnnotationBox | null => {
-        const name = obj.getElementsByTagName("name")[0]?.textContent ?? undefined;
-        const bnd = obj.getElementsByTagName("bndbox")[0];
-        if (!bnd) {
-          return null;
-        }
-        const xmin = Number(bnd.getElementsByTagName("xmin")[0]?.textContent ?? 0);
-        const ymin = Number(bnd.getElementsByTagName("ymin")[0]?.textContent ?? 0);
-        const xmax = Number(bnd.getElementsByTagName("xmax")[0]?.textContent ?? 0);
-        const ymax = Number(bnd.getElementsByTagName("ymax")[0]?.textContent ?? 0);
-        const box: AnnotationBox = {
-          id: String(index + 1),
-          x: xmin,
-          y: ymin,
-          width: Math.max(0, xmax - xmin),
-          height: Math.max(0, ymax - ymin),
-          imageId
-        };
-        if (name) {
-          box.label = name;
-        }
-        return box;
-      })
-      .filter((item): item is AnnotationBox => item !== null);
-
-    return {
-      boxes,
-      format: "Pascal VOC",
-      images: [{ id: imageId, file_name: fileName, width, height }]
-    };
-  };
-
-  const parseYolo = (rawText: string): AnnotationParseResult => {
-    if (!imageMetrics.naturalWidth || !imageMetrics.naturalHeight) {
-      return {
-        boxes: [],
-        format: "YOLO",
-        warning: "画像サイズ未取得のため描画できません"
-      };
-    }
-    const imageId = 1;
-    const lines = rawText.split(/\r?\n/).filter((line) => line.trim().length > 0);
-    const boxes = lines
-      .map((line, index): AnnotationBox | null => {
-        const parts = line.trim().split(/\s+/);
-        if (parts.length < 5) {
-          return null;
-        }
-        const [classId, xCenter, yCenter, width, height] = parts.map(Number);
-        const absWidth = width * imageMetrics.naturalWidth;
-        const absHeight = height * imageMetrics.naturalHeight;
-        const absX = xCenter * imageMetrics.naturalWidth - absWidth / 2;
-        const absY = yCenter * imageMetrics.naturalHeight - absHeight / 2;
-        const box: AnnotationBox = {
-          id: String(index + 1),
-          x: absX,
-          y: absY,
-          width: absWidth,
-          height: absHeight,
-          imageId
-        };
-        if (Number.isFinite(classId)) {
-          box.label = `class_${classId}`;
-        }
-        return box;
-      })
-      .filter((item): item is AnnotationBox => item !== null);
-
-    const fallbackName = imageName ?? "image.jpg";
-    return {
-      boxes,
-      format: "YOLO",
-      images: [{ id: imageId, file_name: fallbackName }]
-    };
-  };
-
   const handleAnnotationChange = async (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
@@ -505,7 +269,7 @@ export default function App() {
         parseResult = parseVoc(rawText);
         setAnnotationSource("voc");
       } else if (isTxt) {
-        parseResult = parseYolo(rawText);
+        parseResult = parseYolo(rawText, imageMetrics, imageName);
         setAnnotationSource("yolo");
       }
 
@@ -544,6 +308,7 @@ export default function App() {
             if (!loaded) {
               setImageMismatch(
                 `画像の読み込みに失敗しました。パス: ${buildAttemptedPath(
+                  imageRootName,
                   first.file_name
                 )}`
               );
@@ -589,6 +354,7 @@ export default function App() {
       if (!loaded) {
         setImageMismatch(
           `画像の読み込みに失敗しました。パス: ${buildAttemptedPath(
+            imageRootName,
             item.file_name
           )}`
         );
@@ -654,188 +420,63 @@ export default function App() {
 
   return (
     <div className="app">
-      <header className="toolbar">
-        <div className="toolbar__group">
-          <button className="btn" type="button" onClick={handleImageClick}>
-            画像読み込み
-          </button>
-          <input
-            ref={imageInputRef}
-            className="file-input"
-            type="file"
-            accept="image/*"
-            aria-label="画像ファイルを選択"
-            onChange={handleImageChange}
-          />
+      <Toolbar
+        onImageClick={handleImageClick}
+        onAnnotationClick={handleAnnotationClick}
+        onSelectRootFolder={handleSelectRootFolder}
+        imageRootName={imageRootName}
+        onSave={handleSaveAnnotations}
+        canSave={annotationBoxes.length > 0 && Boolean(imageName)}
+        showAnnotationPanel={showAnnotationPanel}
+        onToggleAnnotationPanel={() =>
+          setShowAnnotationPanel((prev) => !prev)
+        }
+      />
 
-          <button className="btn" type="button" onClick={handleAnnotationClick}>
-            アノテーション読込
-          </button>
-          <input
-            ref={annotationInputRef}
-            className="file-input"
-            type="file"
-            accept=".json,.xml,.txt,.csv"
-            aria-label="アノテーションデータを選択"
-            onChange={(event) => void handleAnnotationChange(event)}
-          />
+      <input
+        ref={imageInputRef}
+        className="file-input"
+        type="file"
+        accept="image/*"
+        aria-label="画像ファイルを選択"
+        onChange={handleImageChange}
+      />
 
-          <button className="btn" type="button" onClick={handleSelectRootFolder}>
-            画像ルートフォルダー選択
-          </button>
-          {imageRootName && (
-            <span className="hint">選択中: {imageRootName}</span>
-          )}
-        </div>
-
-        <div className="toolbar__group">
-          <button
-            className="btn btn--primary"
-            type="button"
-            onClick={handleSaveAnnotations}
-            disabled={annotationBoxes.length === 0 || !imageName}
-          >
-            アノテーション保存
-          </button>
-          <button
-            className="btn"
-            type="button"
-            onClick={() => setShowAnnotationPanel((prev) => !prev)}
-          >
-            JSON表示: {showAnnotationPanel ? "ON" : "OFF"}
-          </button>
-          <span className="hint">※保存は作成・編集モードのみ</span>
-        </div>
-      </header>
+      <input
+        ref={annotationInputRef}
+        className="file-input"
+        type="file"
+        accept=".json,.xml,.txt,.csv"
+        aria-label="アノテーションデータを選択"
+        onChange={(event) => void handleAnnotationChange(event)}
+      />
 
       <main className="layout">
-        <aside className="sidebar">
-          <div className="sidebar__header">アノテーション一覧</div>
-          {annotationItems.length === 0 ? (
-            <div className="sidebar__empty">データ未読込</div>
-          ) : (
-            <ul className="sidebar__list">
-              {annotationItems.map((item, index) => {
-                const isActive = item.id === selectedImageId;
-                return (
-                  <li key={item.id}>
-                    <button
-                      className={`sidebar__item${isActive ? " is-active" : ""}`}
-                      type="button"
-                      onClick={() => void handleSelectImageItem(item)}
-                    >
-                      <span className="sidebar__index">{index + 1}</span>
-                      <span className="sidebar__name">
-                        {getBaseName(item.file_name)}
-                      </span>
-                      <span className="sidebar__count">
-                        {getBoxCount(item.id)} 件
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </aside>
-
-        <div className="canvas-area">
-          <div className="canvas">
-            {imageUrl ? (
-              <div className="canvas__media">
-                <img
-                  ref={imageRef}
-                  src={imageUrl}
-                  alt={imageName ?? "選択した画像"}
-                  onLoad={handleImageLoad}
-                />
-                {svgSize && hasAnnotations && imageMetrics.naturalWidth > 0 && (
-                  <svg
-                    className="annotation-overlay"
-                    width={svgSize.width}
-                    height={svgSize.height}
-                    viewBox={`0 0 ${imageMetrics.naturalWidth} ${imageMetrics.naturalHeight}`}
-                    preserveAspectRatio="none"
-                  >
-                    {annotationBoxes.map((box) => (
-                      <g key={`${box.id}-${box.x}-${box.y}`}>
-                        <rect
-                          x={box.x}
-                          y={box.y}
-                          width={box.width}
-                          height={box.height}
-                          rx={6}
-                          className="annotation-overlay__box"
-                        />
-                        {box.label && (
-                          <text
-                            x={box.x + 6}
-                            y={box.y - 6}
-                            className="annotation-overlay__label"
-                          >
-                            {box.label}
-                          </text>
-                        )}
-                      </g>
-                    ))}
-                  </svg>
-                )}
-                {imageName && <div className="canvas__caption">{imageName}</div>}
-                {!hasAnnotations && annotationName && (
-                  <div className="canvas__badge">アノテーション未解析</div>
-                )}
-              </div>
-            ) : (
-              <div className="canvas__placeholder">
-                <div>画像とアノテーションをここに表示</div>
-                {selectedImageName && (
-                  <div className="canvas__hint">
-                    選択中: {selectedImageName}
-                    <button
-                      className="btn btn--ghost"
-                      type="button"
-                      onClick={handleImageClick}
-                    >
-                      画像ファイルを選択
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-            {imageMismatch && (
-              <div className="canvas__warning">{imageMismatch}</div>
-            )}
-            {showAnnotationPanel &&
-              annotationName &&
-              (annotationContent || annotationError) && (
-              <aside className="annotation-panel">
-                <div className="annotation-panel__header">
-                  <span>アノテーション</span>
-                  <span className="annotation-panel__name">{annotationName}</span>
-                </div>
-                {annotationFormat && (
-                  <div className="annotation-panel__meta">
-                    形式: {annotationFormat}
-                  </div>
-                )}
-                {annotationWarning && (
-                  <div className="annotation-panel__warning">
-                    {annotationWarning}
-                  </div>
-                )}
-                {annotationError ? (
-                  <div className="annotation-panel__error">
-                    読み込みエラー: {annotationError}
-                  </div>
-                ) : (
-                  <pre className="annotation-panel__content">
-                    {annotationContent}
-                  </pre>
-                )}
-              </aside>
-            )}
-          </div>
-        </div>
+        <Sidebar
+          items={annotationItems}
+          selectedImageId={selectedImageId}
+          onSelect={handleSelectImageItem}
+          getBoxCount={getBoxCount}
+        />
+        <CanvasArea
+          imageUrl={imageUrl}
+          imageName={imageName}
+          imageRef={imageRef}
+          onImageLoad={handleImageLoad}
+          annotationBoxes={annotationBoxes}
+          hasAnnotations={hasAnnotations}
+          svgSize={svgSize}
+          imageMetrics={imageMetrics}
+          annotationName={annotationName}
+          showAnnotationPanel={showAnnotationPanel}
+          annotationContent={annotationContent}
+          annotationError={annotationError}
+          annotationFormat={annotationFormat}
+          annotationWarning={annotationWarning}
+          imageMismatch={imageMismatch}
+          selectedImageName={selectedImageName}
+          onImageClick={handleImageClick}
+        />
       </main>
     </div>
   );
