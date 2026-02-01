@@ -17,6 +17,10 @@ export type AnnotationImage = {
 
 export type DirectoryHandle = {
   name?: string;
+  entries?: () => AsyncIterableIterator<[
+    string,
+    { kind: "file" | "directory"; name: string }
+  ]>;
   getDirectoryHandle: (
     name: string,
     options?: { create?: boolean }

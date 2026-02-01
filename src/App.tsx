@@ -46,6 +46,9 @@ export default function App() {
     null
   );
   const [imageRootName, setImageRootName] = useState<string | null>(null);
+  const [vocFileMap, setVocFileMap] = useState<Map<string, File>>(
+    () => new Map()
+  );
   const [imageMetrics, setImageMetrics] = useState<ImageMetrics>({
     naturalWidth: 0,
     naturalHeight: 0,
@@ -241,6 +244,8 @@ export default function App() {
 
       let parseResult: AnnotationParseResult | null = null;
       let parsed: unknown = null;
+      let nextSource: AnnotationSource = null;
+      const pickedFiles = Array.from(event.target.files ?? []);
 
       if (isJson) {
         parsed = JSON.parse(rawText);
@@ -256,21 +261,21 @@ export default function App() {
             : false;
           if (hasTextFields) {
             parseResult = parseCocoText(parsed);
-            setAnnotationSource("coco-text");
+            nextSource = "coco-text";
           } else {
             parseResult = parseCoco(parsed);
-            setAnnotationSource("coco");
+            nextSource = "coco";
           }
         } else {
           parseResult = { boxes: parseAnnotationBoxes(parsed), format: "簡易JSON" };
-          setAnnotationSource("simple");
+          nextSource = "simple";
         }
       } else if (isXml) {
         parseResult = parseVoc(rawText);
-        setAnnotationSource("voc");
+        nextSource = "voc";
       } else if (isTxt) {
         parseResult = parseYolo(rawText, imageMetrics, imageName);
-        setAnnotationSource("yolo");
+        nextSource = "yolo";
       }
 
       const formatted = isJson
@@ -282,44 +287,94 @@ export default function App() {
           ? `${formatted.slice(0, previewLimit)}\n...`
           : formatted;
       setAnnotationContent(preview);
+      setAnnotationSource(nextSource);
       if (parseResult) {
-        const nextItems = parseResult.images ?? [];
-        const grouped = new Map<number, AnnotationBox[]>();
-        parseResult.boxes.forEach((box) => {
-          const imageId = box.imageId ?? 0;
-          if (!grouped.has(imageId)) {
-            grouped.set(imageId, []);
+        if (nextSource === "voc") {
+          const xmlFiles = pickedFiles.filter((picked) =>
+            picked.name.toLowerCase().endsWith(".xml")
+          );
+          if (xmlFiles.length === 0) {
+            xmlFiles.push(file);
           }
-          grouped.get(imageId)?.push(box);
-        });
 
-        setAnnotationItems(nextItems);
-        setBoxesByImageId(grouped);
-        setAnnotationFormat(parseResult.format);
-        setAnnotationWarning(parseResult.warning ?? null);
+          const nextItems = xmlFiles
+            .map((picked, index) => ({ id: index + 1, file_name: picked.name }))
+            .sort((a, b) => a.file_name.localeCompare(b.file_name));
+          const fileMap = new Map<string, File>();
+          xmlFiles.forEach((picked) => {
+            fileMap.set(picked.name, picked);
+          });
+          setVocFileMap(fileMap);
 
-        if (nextItems.length > 0) {
-          const first = nextItems[0];
-          setSelectedImageId(first.id);
-          setSelectedImageName(first.file_name);
-          setAnnotationBoxes(grouped.get(first.id) ?? []);
-          if (imageRootHandle) {
-            const loaded = await tryLoadImageFromRoot(first.file_name);
+          const selected =
+            nextItems.find((item) => item.file_name === file.name) ?? nextItems[0];
+          const grouped = new Map<number, AnnotationBox[]>();
+          grouped.set(selected.id, parseResult.boxes);
+
+          setAnnotationItems(nextItems);
+          setBoxesByImageId(grouped);
+          setAnnotationFormat(parseResult.format);
+          setAnnotationWarning(parseResult.warning ?? null);
+          setSelectedImageId(selected.id);
+
+          const vocImage = parseResult.images?.[0];
+          const vocImageName = vocImage?.file_name ?? null;
+          setSelectedImageName(vocImageName);
+          setAnnotationBoxes(parseResult.boxes);
+
+          if (vocImageName && imageRootHandle) {
+            const loaded = await tryLoadImageFromRoot(vocImageName);
             if (!loaded) {
               setImageMismatch(
                 `画像の読み込みに失敗しました。パス: ${buildAttemptedPath(
                   imageRootName,
-                  first.file_name
+                  vocImageName
                 )}`
               );
+            } else {
+              setImageMismatch(null);
             }
-          } else if (imageName && getBaseName(first.file_name) !== imageName) {
-            setImageMismatch("画像が未選択です。該当画像を読み込んでください。");
           }
         } else {
-          setSelectedImageId(null);
-          setSelectedImageName(null);
-          setAnnotationBoxes(parseResult.boxes);
+          setVocFileMap(new Map());
+          const nextItems = parseResult.images ?? [];
+          const grouped = new Map<number, AnnotationBox[]>();
+          parseResult.boxes.forEach((box) => {
+            const imageId = box.imageId ?? 0;
+            if (!grouped.has(imageId)) {
+              grouped.set(imageId, []);
+            }
+            grouped.get(imageId)?.push(box);
+          });
+
+          setAnnotationItems(nextItems);
+          setBoxesByImageId(grouped);
+          setAnnotationFormat(parseResult.format);
+          setAnnotationWarning(parseResult.warning ?? null);
+
+          if (nextItems.length > 0) {
+            const first = nextItems[0];
+            setSelectedImageId(first.id);
+            setSelectedImageName(first.file_name);
+            setAnnotationBoxes(grouped.get(first.id) ?? []);
+            if (imageRootHandle) {
+              const loaded = await tryLoadImageFromRoot(first.file_name);
+              if (!loaded) {
+                setImageMismatch(
+                  `画像の読み込みに失敗しました。パス: ${buildAttemptedPath(
+                    imageRootName,
+                    first.file_name
+                  )}`
+                );
+              }
+            } else if (imageName && getBaseName(first.file_name) !== imageName) {
+              setImageMismatch("画像が未選択です。該当画像を読み込んでください。");
+            }
+          } else {
+            setSelectedImageId(null);
+            setSelectedImageName(null);
+            setAnnotationBoxes(parseResult.boxes);
+          }
         }
       } else {
         setAnnotationBoxes([]);
@@ -329,6 +384,7 @@ export default function App() {
         setBoxesByImageId(new Map());
         setSelectedImageId(null);
         setSelectedImageName(null);
+        setVocFileMap(new Map());
       }
     } catch (error) {
       const message =
@@ -342,11 +398,65 @@ export default function App() {
       setBoxesByImageId(new Map());
       setSelectedImageId(null);
       setSelectedImageName(null);
+      setVocFileMap(new Map());
     }
   };
 
   const handleSelectImageItem = async (item: AnnotationImage) => {
     setSelectedImageId(item.id);
+    setAnnotationError(null);
+    setAnnotationWarning(null);
+    setImageMismatch(null);
+    if (annotationSource === "voc") {
+      try {
+        const targetFile = vocFileMap.get(item.file_name);
+        if (!targetFile) {
+          setAnnotationWarning("選択したXMLファイルを読み込めません。");
+          return;
+        }
+        const file = targetFile;
+        const rawText = await file.text();
+        const parseResult = parseVoc(rawText);
+        const formatted = rawText;
+        const previewLimit = 5000;
+        const preview =
+          formatted.length > previewLimit
+            ? `${formatted.slice(0, previewLimit)}\n...`
+            : formatted;
+        setAnnotationName(item.file_name);
+        setAnnotationContent(preview);
+        setAnnotationFormat(parseResult.format);
+        setAnnotationBoxes(parseResult.boxes);
+        setBoxesByImageId(new Map([[item.id, parseResult.boxes]]));
+
+        const vocImage = parseResult.images?.[0];
+        const vocImageName = vocImage?.file_name ?? null;
+        setSelectedImageName(vocImageName);
+
+        if (vocImageName && imageRootHandle) {
+          const loaded = await tryLoadImageFromRoot(vocImageName);
+          if (!loaded) {
+            setImageMismatch(
+              `画像の読み込みに失敗しました。パス: ${buildAttemptedPath(
+                imageRootName,
+                vocImageName
+              )}`
+            );
+          } else {
+            setImageMismatch(null);
+          }
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "読み込みに失敗しました";
+        setAnnotationError(message);
+        setAnnotationContent(null);
+        setAnnotationBoxes([]);
+        setAnnotationFormat(null);
+      }
+      return;
+    }
+
     setSelectedImageName(item.file_name);
     setAnnotationBoxes(boxesByImageId.get(item.id) ?? []);
     if (imageRootHandle) {
@@ -446,6 +556,7 @@ export default function App() {
         ref={annotationInputRef}
         className="file-input"
         type="file"
+        multiple
         accept=".json,.xml,.txt,.csv"
         aria-label="アノテーションデータを選択"
         onChange={(event) => void handleAnnotationChange(event)}

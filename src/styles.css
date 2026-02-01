@@ -234,11 +234,17 @@ body {
   height: 100%;
 }
 
+.canvas__frame {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+
 .canvas__media img {
+  display: block;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
-  border-radius: 12px;
   box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
 }
 
@@ -291,7 +297,7 @@ body {
   display: grid;
   gap: 10px;
   box-shadow: 0 20px 45px rgba(15, 23, 42, 0.25);
-  overflow: hidden;
+  overflow: auto;
 }
 
 .annotation-panel__header {

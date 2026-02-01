@@ -45,43 +45,44 @@ export default function CanvasArea({
       <div className="canvas">
         {imageUrl ? (
           <div className="canvas__media">
-            <img
-              ref={imageRef}
-              src={imageUrl}
-              alt={imageName ?? "選択した画像"}
-              onLoad={onImageLoad}
-            />
-            {svgSize && hasAnnotations && imageMetrics.naturalWidth > 0 && (
-              <svg
-                className="annotation-overlay"
-                width={svgSize.width}
-                height={svgSize.height}
-                viewBox={`0 0 ${imageMetrics.naturalWidth} ${imageMetrics.naturalHeight}`}
-                preserveAspectRatio="none"
-              >
-                {annotationBoxes.map((box) => (
-                  <g key={`${box.id}-${box.x}-${box.y}`}>
-                    <rect
-                      x={box.x}
-                      y={box.y}
-                      width={box.width}
-                      height={box.height}
-                      rx={6}
-                      className="annotation-overlay__box"
-                    />
-                    {box.label && (
-                      <text
-                        x={box.x + 6}
-                        y={box.y - 6}
-                        className="annotation-overlay__label"
-                      >
-                        {box.label}
-                      </text>
-                    )}
-                  </g>
-                ))}
-              </svg>
-            )}
+            <div className="canvas__frame">
+              <img
+                ref={imageRef}
+                src={imageUrl}
+                alt={imageName ?? "選択した画像"}
+                onLoad={onImageLoad}
+              />
+              {svgSize && hasAnnotations && imageMetrics.naturalWidth > 0 && (
+                <svg
+                  className="annotation-overlay"
+                  width="100%"
+                  height="100%"
+                  viewBox={`0 0 ${imageMetrics.naturalWidth} ${imageMetrics.naturalHeight}`}
+                  preserveAspectRatio="none"
+                >
+                  {annotationBoxes.map((box) => (
+                    <g key={`${box.id}-${box.x}-${box.y}`}>
+                      <rect
+                        x={box.x}
+                        y={box.y}
+                        width={box.width}
+                        height={box.height}
+                        className="annotation-overlay__box"
+                      />
+                      {box.label && (
+                        <text
+                          x={box.x + 6}
+                          y={box.y - 6}
+                          className="annotation-overlay__label"
+                        >
+                          {box.label}
+                        </text>
+                      )}
+                    </g>
+                  ))}
+                </svg>
+              )}
+            </div>
             {imageName && <div className="canvas__caption">{imageName}</div>}
             {!hasAnnotations && annotationName && (
               <div className="canvas__badge">アノテーション未解析</div>
