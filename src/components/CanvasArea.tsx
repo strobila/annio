@@ -1,4 +1,4 @@
-import type { RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import type { AnnotationBox } from "../types";
 
 type CanvasAreaProps = {
@@ -40,12 +40,44 @@ export default function CanvasArea({
   selectedImageName,
   onImageClick
 }: CanvasAreaProps) {
+  const [zoom, setZoom] = useState(1);
+  const mediaRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setZoom(1);
+  }, [imageUrl]);
+
+  useEffect(() => {
+    const target = mediaRef.current;
+    if (!target) {
+      return;
+    }
+
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) {
+        return;
+      }
+      if (!target.contains(event.target as Node)) {
+        return;
+      }
+      event.preventDefault();
+      const direction = event.deltaY > 0 ? 0.9 : 1.1;
+      setZoom((prev) => Math.min(5, Math.max(0.2, prev * direction)));
+    };
+
+    target.addEventListener("wheel", onWheel, { passive: false });
+    return () => target.removeEventListener("wheel", onWheel);
+  }, []);
+
   return (
     <div className="canvas-area">
       <div className="canvas">
         {imageUrl ? (
-          <div className="canvas__media">
-            <div className="canvas__frame">
+          <div className="canvas__media" ref={mediaRef}>
+            <div
+              className="canvas__frame"
+              style={{ transform: `scale(${zoom})` }}
+            >
               <img
                 ref={imageRef}
                 src={imageUrl}

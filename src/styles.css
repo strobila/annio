@@ -232,12 +232,14 @@ body {
   gap: 12px;
   width: 100%;
   height: 100%;
+  overflow: auto;
 }
 
 .canvas__frame {
   position: relative;
   display: inline-block;
   line-height: 0;
+  transform-origin: center center;
 }
 
 .canvas__media img {
