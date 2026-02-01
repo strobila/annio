@@ -34,6 +34,7 @@ export default function App() {
   const [annotationSource, setAnnotationSource] = useState<AnnotationSource>(
     null
   );
+  const [mode, setMode] = useState<"view" | "edit">("view");
   const [showAnnotationPanel, setShowAnnotationPanel] = useState(false);
   const [annotationItems, setAnnotationItems] = useState<AnnotationImage[]>([]);
   const [selectedImageId, setSelectedImageId] = useState<number | null>(null);
@@ -221,6 +222,19 @@ export default function App() {
       displayHeight: image.clientHeight
     });
   };
+
+  const handleUpdateBoxes = useCallback(
+    (nextBoxes: AnnotationBox[]) => {
+      setAnnotationBoxes(nextBoxes);
+      setBoxesByImageId((prev) => {
+        const nextMap = new Map(prev);
+        const key = selectedImageId ?? 0;
+        nextMap.set(key, nextBoxes);
+        return nextMap;
+      });
+    },
+    [selectedImageId]
+  );
 
   const handleAnnotationChange = async (
     event: React.ChangeEvent<HTMLInputElement>
@@ -536,7 +550,13 @@ export default function App() {
         onSelectRootFolder={handleSelectRootFolder}
         imageRootName={imageRootName}
         onSave={handleSaveAnnotations}
-        canSave={annotationBoxes.length > 0 && Boolean(imageName)}
+        canSave={
+          mode === "edit" && annotationBoxes.length > 0 && Boolean(imageName)
+        }
+        mode={mode}
+        onToggleMode={() =>
+          setMode((prev) => (prev === "edit" ? "view" : "edit"))
+        }
         showAnnotationPanel={showAnnotationPanel}
         onToggleAnnotationPanel={() =>
           setShowAnnotationPanel((prev) => !prev)
@@ -578,6 +598,8 @@ export default function App() {
           hasAnnotations={hasAnnotations}
           svgSize={svgSize}
           imageMetrics={imageMetrics}
+          mode={mode}
+          onUpdateBoxes={handleUpdateBoxes}
           annotationName={annotationName}
           showAnnotationPanel={showAnnotationPanel}
           annotationContent={annotationContent}

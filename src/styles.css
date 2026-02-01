@@ -248,6 +248,7 @@ body {
   max-height: 100%;
   object-fit: contain;
   box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+  user-select: none;
 }
 
 .canvas__caption {
@@ -273,10 +274,43 @@ body {
   pointer-events: none;
 }
 
+.annotation-overlay.is-edit {
+  pointer-events: auto;
+}
+
 .annotation-overlay__box {
   fill: rgba(56, 189, 248, 0.08);
   stroke: #38bdf8;
   stroke-width: 2;
+  pointer-events: all;
+  cursor: move;
+}
+
+.annotation-overlay__handle {
+  fill: #ffffff;
+  stroke: #38bdf8;
+  stroke-width: 2;
+  pointer-events: all;
+}
+
+.annotation-overlay__handle--n,
+.annotation-overlay__handle--s {
+  cursor: ns-resize;
+}
+
+.annotation-overlay__handle--e,
+.annotation-overlay__handle--w {
+  cursor: ew-resize;
+}
+
+.annotation-overlay__handle--ne,
+.annotation-overlay__handle--sw {
+  cursor: nesw-resize;
+}
+
+.annotation-overlay__handle--nw,
+.annotation-overlay__handle--se {
+  cursor: nwse-resize;
 }
 
 .annotation-overlay__label {

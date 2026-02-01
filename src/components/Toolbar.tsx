@@ -5,6 +5,8 @@ type ToolbarProps = {
   imageRootName: string | null;
   onSave: () => void;
   canSave: boolean;
+  mode: "view" | "edit";
+  onToggleMode: () => void;
   showAnnotationPanel: boolean;
   onToggleAnnotationPanel: () => void;
 };
@@ -16,6 +18,8 @@ export default function Toolbar({
   imageRootName,
   onSave,
   canSave,
+  mode,
+  onToggleMode,
   showAnnotationPanel,
   onToggleAnnotationPanel
 }: ToolbarProps) {
@@ -37,6 +41,9 @@ export default function Toolbar({
       </div>
 
       <div className="toolbar__group">
+        <button className="btn" type="button" onClick={onToggleMode}>
+          モード: {mode === "edit" ? "作成・編集" : "読取専用"}
+        </button>
         <button
           className="btn btn--primary"
           type="button"

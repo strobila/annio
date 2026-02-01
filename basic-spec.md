@@ -143,3 +143,165 @@
   - [未実装] 画像上をマウスドラッグしてアノテーション矩形の追加が可能
   - [未実装] クリックで選択した矩形座標の調整およびクラスラベルorテキストの編集が可能
   - [未実装] 矩形を選択した状態でDeleteキーを押すと、矩形の削除が可能
+
+---
+
+# 作成／編集モード 詳細設計（案）
+
+## 状態構造
+- `mode`: `"view" | "edit"`
+- `image`
+  - `url`, `name`, `metrics`（natural / display）
+- `annotations`
+  - `boxes: AnnotationBox[]`（単一ソース）
+  - `selectedId: string | null`
+  - `draftBox?: AnnotationBox`（作成中）
+- `history`
+  - `past: AnnotationBox[][]`
+  - `future: AnnotationBox[][]`
+- `ui`
+  - `zoom: number`
+  - `pan: { x: number; y: number }`
+  - `showAnnotationPanel: boolean`
+  - `status: "idle" | "drawing" | "dragging" | "resizing"`
+
+## 状態遷移（mermaid）
+```mermaid
+stateDiagram-v2
+  [*] --> Idle
+
+  state "編集モード" as Edit {
+    Idle --> Drawing : pointerdown (canvas)
+    Drawing --> Drawing : pointermove
+    Drawing --> Idle : pointerup / 確定
+
+    Idle --> Dragging : pointerdown (box)
+    Dragging --> Dragging : pointermove
+    Dragging --> Idle : pointerup / 確定
+
+    Idle --> Resizing : pointerdown (handle)
+    Resizing --> Resizing : pointermove
+    Resizing --> Idle : pointerup / 確定
+  }
+
+  state "読取専用モード" as View {
+    Idle : 操作は選択のみ
+  }
+
+  Edit --> View : mode=\"view\"
+  View --> Edit : mode=\"edit\"
+```
+
+## イベントフロー（mermaid）
+```mermaid
+flowchart TB
+  A[ユーザー入力] --> B{mode}
+  B -->|view| C[選択のみ有効]
+  B -->|edit| D[編集イベント有効]
+
+  D --> E[作成: pointerdown on canvas]
+  E --> F[draftBox 更新]
+  F --> G[pointerup で確定]
+  G --> H[boxes に追加]
+  H --> I[history に push]
+
+  D --> J[移動: pointerdown on box]
+  J --> K[座標更新]
+  K --> L[pointerup で確定]
+  L --> I
+
+  D --> M[リサイズ: pointerdown on handle]
+  M --> N[サイズ更新]
+  N --> O[pointerup で確定]
+  O --> I
+
+  D --> P[削除: Delete/Backspace]
+  P --> Q[選択中 box 削除]
+  Q --> I
+
+  D --> R[Undo/Redo]
+  R --> S[history を反映]
+```
+
+## UI配置
+- ツールバー
+  - モード切替トグル（読取専用 / 作成・編集）
+  - 保存ボタン（編集モードのみ有効）
+  - Undo / Redo
+- キャンバス
+  - 画像 + オーバーレイ（共通）
+  - 編集モードのみ
+    - 選択枠・リサイズハンドル
+    - 作成中の`draftBox`表示
+- サイドバー
+  - 画像/アノテーション一覧（共通）
+- 右下パネル
+  - JSONプレビュー（共通）
+
+---
+
+# history管理・座標変換（ズーム/パン）の詳細
+
+## history管理（Undo / Redo）
+### 状態
+- `history.past: AnnotationBox[][]`
+- `history.future: AnnotationBox[][]`
+
+### ルール
+- 変更確定時（`pointerup` / `Delete` など）に
+  - `past.push(deepClone(boxes))`
+  - `future = []`
+- Undo
+  - `future.push(current)`
+  - `boxes = past.pop() ?? current`
+- Redo
+  - `past.push(current)`
+  - `boxes = future.pop() ?? current`
+
+### 最適化
+- `past`の最大サイズを設定（例: 100）
+- `deepClone`は `structuredClone` または `map` で複製
+
+## 座標変換（ズーム / パン）
+### 座標系
+- `image`座標: 元画像（自然サイズ）
+- `screen`座標: 画面表示座標
+
+### 状態
+- `ui.zoom: number`（例: 0.2〜5）
+- `ui.pan: { x: number; y: number }`
+
+### 変換式
+- `screen = (image * zoom) + pan`
+- `image = (screen - pan) / zoom`
+
+### ポインタ座標取得
+- `rect = canvas.getBoundingClientRect()`
+- `screen = { x: e.clientX - rect.left, y: e.clientY - rect.top }`
+- `image = toImage(screen)`
+
+### ズーム（Ctrl + Wheel）
+- 基準点はマウス位置
+- 変更前後で同一点が固定されるよう `pan` を補正
+  - `before = toImage(mouseScreen)`
+  - `zoom = clamp(zoom * factor)`
+  - `after = toScreen(before)`
+  - `pan += mouseScreen - after`
+
+### パン
+- 中ボタンまたは `Space + Drag`
+- `pan += deltaScreen`
+
+## 編集操作と座標
+### 作成
+- `startImage = toImage(mouseDownScreen)`
+- `currentImage = toImage(mouseMoveScreen)`
+- `box = normalize(startImage, currentImage)` で確定
+
+### 移動
+- `deltaImage = deltaScreen / zoom`
+- `box.x += deltaImage.x` / `box.y += deltaImage.y`
+
+### リサイズ
+- ハンドル位置を `image`座標で更新
+- `minSize`（例: 4px）を `image`座標で適用
